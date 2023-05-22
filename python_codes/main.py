@@ -4,9 +4,8 @@ import math
 import tensorflow as tf
 import numpy as np
 import teddy as td
-#import nn
+import nnOrsi3 as nn
 import time
-import nn_uni as nn
 import pandas as pd
 
 
@@ -51,7 +50,6 @@ class ModelClassic:
 class NodeType(Enum):
     INPUT = 1
     ADD = 2
-    OR = 3
     NOT = 3
     LOGIC = 4
     CONSTANT = 5
@@ -67,7 +65,7 @@ def is_same(a: List[Any], b: List[Any]) -> bool:
         if is_same(a[1], b[2]) and is_same(a[2], b[1]):
             return True
         return False
-    elif a[0] == NodeType.OR:
+    elif a[0] == NodeType.NOT:
         return is_same(a[1], b[1])
     elif a[0] == NodeType.LOGIC:
         if a[2] != b[2]:
@@ -95,26 +93,30 @@ def simplify(desc: List[Any]) -> Optional[List[Any]]:
             desc[2] = x
             return desc
         return None
-    elif desc[0] == NodeType.OR:
+    elif desc[0] == NodeType.NOT:
         x = simplify(desc[1])
         if x is not None:
             desc[1] = x
             return desc
-        if desc[1][0] == NodeType.OR: # remove double-not
+        if desc[1][0] == NodeType.NOT: # remove double-not
             return cast(List[Any], desc[1][1])
         if desc[1][0] == NodeType.LOGIC: # combine 'not' with 'logical operator'
             if desc[1][2] == 'and':
                 return [NodeType.LOGIC, desc[1][1], 'nand', desc[1][3]]
             elif desc[1][2] == 'or':
                 return [NodeType.LOGIC, desc[1][1], 'nor', desc[1][3]]
-            elif desc[1][2] == 'uni':#elif desc[1][2] == 'xor':
-                return [NodeType.LOGIC, desc[1][1], 'nuni', desc[1][3]]
-            elif desc[1][2] == 'nand':#elif desc[1][2] == 'nand':
-                return [NodeType.LOGIC, desc[1][1], 'and', desc[1][3]]
-            elif desc[1][2] == 'nor':#elif desc[1][2] == 'nor':
-                return [NodeType.LOGIC, desc[1][1], 'or', desc[1][3]]
-            elif desc[1][2] == 'nuni':#elif desc[1][2] == 'nxor':
+            elif desc[1][2] == 'xor':
+                return [NodeType.LOGIC, desc[1][1], 'nxor', desc[1][3]]
+            elif desc[1][2] == 'uni':
+                return [NodeType.LOGIC, desc[1][1], 'notuni', desc[1][3]]
+            elif desc[1][2] == 'notuni':
                 return [NodeType.LOGIC, desc[1][1], 'uni', desc[1][3]]
+            elif desc[1][2] == 'nand':
+                return [NodeType.LOGIC, desc[1][1], 'and', desc[1][3]]
+            elif desc[1][2] == 'nor':
+                return [NodeType.LOGIC, desc[1][1], 'or', desc[1][3]]
+            elif desc[1][2] == 'nxor':
+                return [NodeType.LOGIC, desc[1][1], 'xor', desc[1][3]]
         return None
     elif desc[0] == NodeType.LOGIC:
         x = simplify(desc[1])
@@ -136,8 +138,8 @@ def simplify(desc: List[Any]) -> Optional[List[Any]]:
                     return cast(List[Any], desc[1]) # (x and true) -> (x)
                 else:
                     return [NodeType.CONSTANT, False] # (x and false) -> (false)
-           # if is_same(desc[1], desc[3]):
-            #    return cast(List[Any], desc[1]) # (x and x) -> (x)
+            if is_same(desc[1], desc[3]):
+                return cast(List[Any], desc[1]) # (x and x) -> (x)
         elif desc[2] == 'or':
             if desc[1][0] == NodeType.CONSTANT:
                 if desc[1][1]:
@@ -149,17 +151,17 @@ def simplify(desc: List[Any]) -> Optional[List[Any]]:
                     return [NodeType.CONSTANT, True] # (x or true) -> (true)
                 else:
                     return cast(List[Any], desc[1]) # (x or false) -> (x)
-           # if is_same(desc[1], desc[3]):
-            #    return cast(List[Any], desc[1]) # (x or x) -> (x)
-        elif desc[2] == 'uni':#elif desc[2] == 'xor':
+            if is_same(desc[1], desc[3]):
+                return cast(List[Any], desc[1]) # (x or x) -> (x)
+        elif desc[2] == 'xor':
             if desc[1][0] == NodeType.CONSTANT:
                 if desc[1][1]:
-                    return [NodeType.OR, desc[3]] # (true xor x) -> (not x)
+                    return [NodeType.NOT, desc[3]] # (true xor x) -> (not x)
                 else:
                     return cast(List[Any], desc[3]) # (false xor x) -> (x)
             if desc[3][0] == NodeType.CONSTANT:
                 if desc[3][1]:
-                    return [NodeType.OR, desc[1]] # (x xor true) -> (not x)
+                    return [NodeType.NOT, desc[1]] # (x xor true) -> (not x)
                 else:
                     return cast(List[Any], desc[1]) # (x xor false) -> (x)
             if is_same(desc[1], desc[3]):
@@ -167,40 +169,40 @@ def simplify(desc: List[Any]) -> Optional[List[Any]]:
         elif desc[2] == 'nand':
             if desc[1][0] == NodeType.CONSTANT:
                 if desc[1][1]:
-                    return [NodeType.OR, desc[3]] # (true nand x) -> (not x)
+                    return [NodeType.NOT, desc[3]] # (true nand x) -> (not x)
                 else:
                     return [NodeType.CONSTANT, True] # (false nand x) -> (true)
             if desc[3][0] == NodeType.CONSTANT:
                 if desc[3][1]:
-                    return [NodeType.OR, desc[1]] # (x nand true) -> (not x)
+                    return [NodeType.NOT, desc[1]] # (x nand true) -> (not x)
                 else:
                     return [NodeType.CONSTANT, True] # (x nand false) -> (true)
-          #  if is_same(desc[1], desc[3]):
-           #     return [NodeType.OR, desc[1]] # (x nand x) -> (not x)
+            if is_same(desc[1], desc[3]):
+                return [NodeType.NOT, desc[1]] # (x nand x) -> (not x)
         elif desc[2] == 'nor':
             if desc[1][0] == NodeType.CONSTANT:
                 if desc[1][1]:
                     return [NodeType.CONSTANT, False] # (true nor x) -> (false)
                 else:
-                    return [NodeType.OR, desc[3]] # (false nor x) -> (not x)
+                    return [NodeType.NOT, desc[3]] # (false nor x) -> (not x)
             if desc[3][0] == NodeType.CONSTANT:
                 if desc[3][1]:
                     return [NodeType.CONSTANT, False] # (x nor true) -> (false)
                 else:
-                    return [NodeType.OR, desc[1]] # (x nor false) -> (not x)
-           # if is_same(desc[1], desc[3]):
-            #    return [NodeType.OR, desc[1]] # (x nor x) -> (not x)
-        elif desc[2] == 'nuni':
+                    return [NodeType.NOT, desc[1]] # (x nor false) -> (not x)
+            if is_same(desc[1], desc[3]):
+                return [NodeType.NOT, desc[1]] # (x nor x) -> (not x)
+        elif desc[2] == 'nxor':
             if desc[1][0] == NodeType.CONSTANT:
                 if desc[1][1]:
                     return cast(List[Any], desc[3]) # (true nxor x) -> (x)
                 else:
-                    return [NodeType.OR, desc[3]] # (false nxor x) -> (not x)
+                    return [NodeType.NOT, desc[3]] # (false nxor x) -> (not x)
             if desc[3][0] == NodeType.CONSTANT:
                 if desc[3][1]:
                     return cast(List[Any], desc[1]) # (x nxor true) -> (x)
                 else:
-                    return [NodeType.OR, desc[1]] # (x nxor false) -> (not x)
+                    return [NodeType.NOT, desc[1]] # (x nxor false) -> (not x)
             if is_same(desc[1], desc[3]):
                 return [NodeType.CONSTANT, True] # (x nxor x) -> (true)
         return None
@@ -225,8 +227,8 @@ def print_description(desc: List[Any]) -> None:
         print_description(desc[1])
         print(' + ', end='')
         print_description(desc[2])
-    elif desc[0] == NodeType.OR:
-        print('or (', end='')
+    elif desc[0] == NodeType.NOT:
+        print('not (', end='')
         print_description(desc[1])
         print(')', end='')
     elif desc[0] == NodeType.LOGIC:
@@ -280,7 +282,7 @@ class ModelFuzzyLogic:
         self.optimizer.minimize(lambda: self.cost(x, y), self.params)
         self.h4.clip_weights()
         self.h5.clip_weights()
-        self.h8.clip_weights()
+        self.h5.clip_weights()
         self.h9.clip_weights()
 
     # Activates the network with a mini-batch and computes the total number of misclassified patterns.
@@ -312,7 +314,7 @@ class ModelFuzzyLogic:
                     if abs(w[i,unit]) > 1.01:
                         raise ValueError('weight out of range: {w[i,unit]}')
                     if w[i,unit] < 0:
-                        node = [NodeType.OR, node]
+                        node = [NodeType.NOT, node]
                     if result:
                         result = [NodeType.ADD, result, node]
                     else:
@@ -416,116 +418,69 @@ datasets = [
     'yeast',
 ]
 #datasets = ["be"]
-
 datasets = ["breast-cancer","diabetes","vehicle"]
-datasets = ["breast-cancer","diabetes","vehicle",]
 #datasets = ['kimentes']
 lista = []
-datasets = [
-  #  'abalone',
-  #  'arrhythmia',
-  #  'audiology',
-  #  'autos',
-    'badges2',
-   # 'balance-scale',
-  #  'balloons',
-    'breast-cancer',
- #   'breast-w',
- #   'bupa',
-    'chess',
-   # 'chess-KingRookVKingPawn',
-   # 'colic',
-   # 'credit-a',
-   # 'credit-g',
-   # 'dermatology',
-    'diabetes',
-   # 'ecoli',
-   # 'glass',
-   # 'heart-c',
-   # 'heart-h',
-   # 'heart-statlog',
-   # 'hepatitis',
-   # 'ionosphere',
-    'iris',
-    'kr-vs-kp',
-   # 'labor',
-   # 'lenses',
-   # 'letter',
-   # 'lungCancer',
-    'lymph',
-   # 'mushroom',
-    'nursery',
-   # 'ozone',
-   # 'primary-tumor',
-   # 'segment',
-  #  'sonar',
-  #  'spambase',
-   # 'spectrometer',
-   # 'splice',
-   # 'teachingAssistant',
-    'titanic',
-    'vehicle',
-    'vote',
-   # 'vowel',
-   # 'waveform-5000',
-   # 'wine',
-    'yeast',
-]
 # Run the test
 for dataset in datasets:
     # Training variables
-
-    repetitions = 3  # increase this value before publishing
-    train_portion = 0.8  # 80/20 split
-    training_epochs = 500  # it would be better to dynamically tune this
-    batch_size = 32  # small batch because UCI datasets are pretty small data
-
+    try:
+        repetitions = 1 # increase this value before publishing
+        train_portion = 0.8 # 80/20 split
+        training_epochs = 500 # it would be better to dynamically tune this
+        batch_size = 32 # small batch because UCI datasets are pretty small data
+        print("loading")
     # Load the data
-    raw:td.Tensor = td.load_arff(f'uci_data/{dataset}.arff')
-    #raw: td.Tensor = td.load_csv(f'uci_data/{dataset}.csv')
-    features = raw[:, :-1].normalize().one_hot().data  # inputs. All continuous values in the range [0,1]
-    labels = raw[:, -1:].normalize().one_hot().data  # outputs. All continuous values in the range [0,1]
-    indexes = np.arange(raw.data.shape[0])  # 0,1,2,3,4,...,n-1
-
+        raw:td.Tensor = td.load_arff(f'uci_data/{dataset}.arff')
+       # raw: td.Tensor = td.load_csv(f'uci_data/{dataset}.csv')
+       # print(raw)
+        print("tensor")
+        features = raw[:,:-1].normalize().one_hot().data # inputs. All continuous values in the range [0,1]
+        print("feature")
+        labels = raw[:,-1:].normalize().one_hot().data # outputs. All continuous values in the range [0,1]
+        print("index")
+        indexes = np.arange(raw.data.shape[0]) # 0,1,2,3,4,...,n-1
+        print("loaded")
     # Do some repetitions
-    start_time = time.time()
-    total_mis: List[float] = []
-    total_tests = 0
-    for i in range(repetitions):
+        start_time = time.time()
+        total_mis: List[float] = []
+        total_tests = 0
+        for i in range(repetitions):
 
         # Divide the raw data into the parts we will need
-        np.random.shuffle(indexes)
-        train_rows = max(1, math.floor(raw.data.shape[0] * train_portion))
-        train_features = features[indexes[:train_rows]]
-        train_labels = labels[indexes[:train_rows]]
-        test_features = features[indexes[train_rows:]]
-        test_labels = labels[indexes[train_rows:]]
-
+            np.random.shuffle(indexes)
+            train_rows = max(1, math.floor(raw.data.shape[0] * train_portion))
+            train_features = features[indexes[:train_rows]]
+            train_labels = labels[indexes[:train_rows]]
+            test_features = features[indexes[train_rows:]]
+            test_labels = labels[indexes[train_rows:]]
+            print("model")
         # Instantiate the models
-        models = [
-            ModelClassic(train_features.shape[1], train_labels.shape[1]),
-            ModelFuzzyLogic(train_features.shape[1], train_labels.shape[1]),
-        ]
+            models = [
+                ModelClassic(train_features.shape[1], train_labels.shape[1]),
+                ModelFuzzyLogic(train_features.shape[1], train_labels.shape[1]),
+            ]
 
         # Train the models
-        train_indexes = np.arange(train_features.shape[0])  # 0,1,2,...
-        for epoch in range(training_epochs):
-            np.random.shuffle(train_indexes)
-            for i in range(train_indexes.shape[0] // batch_size):
-                batch_features = train_features[train_indexes[i * batch_size:(i + 1) * batch_size]]
-                batch_labels = train_labels[train_indexes[i * batch_size:(i + 1) * batch_size]]
-                for model in models:
-                    model.refine(batch_features, batch_labels)  # type: ignore
+            train_indexes = np.arange(train_features.shape[0]) # 0,1,2,...
+            print("train")
+            for epoch in range(training_epochs):
+                np.random.shuffle(train_indexes)
+                for i in range(train_indexes.shape[0] // batch_size):
+                    batch_features = train_features[train_indexes[i*batch_size:(i+1)*batch_size]]
+                    batch_labels = train_labels[train_indexes[i*batch_size:(i+1)*batch_size]]
+                    for model in models:
+                        model.refine(batch_features, batch_labels) # type: ignore
 
         # Test the models
             while len(total_mis) < len(models):
                 total_mis.append(0.)
             for j, model in enumerate(models):
-                total_mis[j] += model.misclassifications(test_features, test_labels).numpy()  # type: ignore
+                total_mis[j] += model.misclassifications(test_features, test_labels).numpy() # type: ignore
             total_tests += test_labels.shape[0]
 
         # Display the fuzzy logic model
-        models[1].describe()  # type: ignore
+            models[1].describe() # type: ignore
 
     # Report results on this dataset
         elapsed_time = time.time() - start_time
@@ -536,5 +491,8 @@ for dataset in datasets:
             adatok.append(total_mis[j] / total_tests)
         print('')
         lista.append(adatok)
+    except:
+        pass
 #dataframe = pd.DataFrame(data=np.array(lista).reshape(len(lista),4),columns=["adat","elteltido","test mis normal miss","test fuzzy miss"])
-#dataframe.to_csv("minusszal",index=False)
+#dataframe.to_csv("simma",index=False)
+
